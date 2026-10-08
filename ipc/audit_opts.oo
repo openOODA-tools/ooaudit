@@ -1,0 +1,82 @@
+// # ooaudit Command-Line Options Parser
+//
+// Logline: Parses command-line arguments for action ledger recording, verification, and query modes.
+//
+// Setup: Pure string argument parser with defaults for sovereign ledger management.
+//
+// Beats:
+//   1. Define AuditOpts configuration struct.
+//   2. Parse flags for record, verify, dump, and stats modes.
+//   3. Extract target paths, actor metadata, and JSON output directives.
+
+pub type AuditOpts = struct {
+    mode: String,
+    ledger_path: String,
+    actor: String,
+    action: String,
+    target: String,
+    status: String,
+    json_output: Bool
+};
+
+pub fn default_audit_opts() -> AuditOpts {
+    return AuditOpts {
+        mode: "dump",
+        ledger_path: "./ooaudit.ledger",
+        actor: "agent",
+        action: "action",
+        target: "system",
+        status: "ok",
+        json_output: false
+    };
+}
+
+pub fn parse_audit_opts(args: List[String]) -> AuditOpts {
+    let mut opts: AuditOpts = default_audit_opts();
+    let n: Int = list_len(args);
+    let mut i: Int = 0;
+
+    while i < n {
+        let arg: String = list_get(args, i);
+        if arg == "-h" || arg == "--help" {
+            opts.mode = "help";
+            return opts;
+        } else if arg == "-v" || arg == "--version" {
+            opts.mode = "version";
+            return opts;
+        } else if arg == "--mcp" {
+            opts.mode = "mcp";
+            return opts;
+        } else if arg == "-r" || arg == "--record" {
+            opts.mode = "record";
+        } else if arg == "-c" || arg == "--verify" {
+            opts.mode = "verify";
+        } else if arg == "-d" || arg == "--dump" {
+            opts.mode = "dump";
+        } else if arg == "-s" || arg == "--stats" {
+            opts.mode = "stats";
+        } else if arg == "--json" {
+            opts.json_output = true;
+        } else if (arg == "-l" || arg == "--ledger") && (i + 1 < n) {
+            i = i + 1;
+            opts.ledger_path = list_get(args, i);
+        } else if arg == "--actor" && (i + 1 < n) {
+            i = i + 1;
+            opts.actor = list_get(args, i);
+        } else if arg == "--action" && (i + 1 < n) {
+            i = i + 1;
+            opts.action = list_get(args, i);
+        } else if arg == "--target" && (i + 1 < n) {
+            i = i + 1;
+            opts.target = list_get(args, i);
+        } else if arg == "--status" && (i + 1 < n) {
+            i = i + 1;
+            opts.status = list_get(args, i);
+        } else if !str_starts_with(arg, "-") && opts.mode == "verify" {
+            opts.ledger_path = arg;
+        }
+        i = i + 1;
+    }
+
+    return opts;
+}

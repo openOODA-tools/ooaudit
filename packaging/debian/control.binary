@@ -1,0 +1,11 @@
+Package: ooaudit
+Version: 0.2.0-1
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: openOODA-tools <ops@openooda.org>
+Depends: libc6
+Description: ACTION LEDGER
+ Immutable audit recorder logging system calls, IO streams, and agent decisions.
+ Capability-bounded openOODA utility with zero ambient authority,
+ hash-chain tamper detection, and native Model Context Protocol (MCP) surface.

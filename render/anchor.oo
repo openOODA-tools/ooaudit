@@ -1,0 +1,16 @@
+// # ooaudit Render Subsystem Anchor
+//
+// Logline: Consolidates terminal styling, tabular display, and JSON serialization.
+//
+// Setup: Root barrel shim for audit rendering and theming domain.
+//
+// Beats:
+//   1. Re-export ANSI color styles and text formatting primitives.
+//   2. Re-export tabular ledger event formatters.
+//   3. Re-export verification reports and ledger statistics JSON serializers.
+
+import "render/audit_theme.oo";
+
+pub fn render_subsystem_version() -> String {
+    return "0.2.0";
+}

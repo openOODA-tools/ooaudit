@@ -1,0 +1,18 @@
+// # ooaudit Core Subsystem Anchor
+//
+// Logline: Consolidates audit entry models, cryptographic hash chains, and ledger persistence.
+//
+// Setup: Root barrel shim for core action ledger domain.
+//
+// Beats:
+//   1. Re-export AuditRecord models and hash digest calculation.
+//   2. Re-export sequential hash-chain verification and tamper detection.
+//   3. Re-export ledger persistence and append operations.
+
+import "core/audit_entry.oo";
+import "core/hash_chain.oo";
+import "core/ledger_parser.oo";
+
+pub fn core_subsystem_version() -> String {
+    return "0.2.0";
+}

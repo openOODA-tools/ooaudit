@@ -1,0 +1,18 @@
+// # ooaudit IPC Subsystem Anchor
+//
+// Logline: Consolidates JSON parsing, command options, and MCP server protocol engine.
+//
+// Setup: Root barrel shim for inter-process communication and MCP transport.
+//
+// Beats:
+//   1. Re-export JSON field extraction and string escaping routines.
+//   2. Re-export command-line option parser and runtime settings.
+//   3. Re-export Model Context Protocol (MCP) stdio server implementation.
+
+import "ipc/json_field.oo";
+import "ipc/audit_opts.oo";
+import "ipc/mcp_serve.oo";
+
+pub fn ipc_subsystem_version() -> String {
+    return "0.2.0";
+}

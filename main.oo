@@ -1,52 +1,122 @@
-// # ooaudit Main Entry Point
+// # ooaudit Main Entry Point - Sovereign Action Ledger
 //
 // Logline: Immutable audit recorder logging system calls, IO streams, and agent decisions.
 //
-// Setup: Demands explicit capability tokens and standard argument list.
+// Setup: Requires FsReadCap, FsWriteCap, ProcessCap, EnvCap. Operates with zero ambient authority.
 //
 // Beats:
-//   1. Parse command-line options and dispatch --help, --version, or --mcp.
-//   2. Execute capability-bounded ooaudit operations.
-//   3. Format and output structured results to standard output.
+//   1. Dispatch --help, --version, and --mcp early without ambient side effects.
+//   2. Record immutable hash-chained events into the sovereign action ledger.
+//   3. Verify chain integrity, audit tamper resistance, or dump ledger entries.
+
+import "core/audit_entry.oo";
+import "core/hash_chain.oo";
+import "core/ledger_parser.oo";
+import "render/audit_theme.oo";
+import "ipc/audit_opts.oo";
+import "ipc/mcp_serve.oo";
 
 fn render_help() -> String {
-    return "ooaudit 0.1.0 (openOODA sovereign agent & security)\n"
+    return "ooaudit 0.2.0 (openOODA sovereign agent & security)\n"
         + "usage: ooaudit [options] [ARGUMENTS]...\n\n"
         + "Immutable audit recorder logging system calls, IO streams, and agent decisions.\n\n"
         + "Options:\n"
-        + "  -h, --help           display this help and exit\n"
-        + "  -v, --version        output version information and exit\n"
-        + "      --json           output formatted as JSON Lines\n"
-        + "      --color <WHEN>   colorize output: auto, always, never [default: auto]\n"
-        + "      --theme <NAME>   override active oote palette\n"
-        + "      --mcp            run as Model Context Protocol stdio server\n";
+        + "  -h, --help               display this help and exit\n"
+        + "  -v, --version            output version information and exit\n"
+        + "  -r, --record             record an audit event into the ledger\n"
+        + "  -c, --verify [LEDGER]    verify cryptographic hash-chain integrity\n"
+        + "  -d, --dump               dump all ledger records (default)\n"
+        + "  -s, --stats              display ledger statistics and head hash\n"
+        + "  -l, --ledger <FILE>      specify audit ledger path [default: ./ooaudit.ledger]\n"
+        + "      --actor <NAME>       event actor name [default: agent]\n"
+        + "      --action <ACTION>    event action type [default: action]\n"
+        + "      --target <TARGET>    event target resource [default: system]\n"
+        + "      --status <STATUS>    event outcome status [default: ok]\n"
+        + "      --json               format output as structured JSON\n"
+        + "      --mcp                run as Model Context Protocol stdio server\n";
 }
 
-fn render_version() -> String {
-    return "ooaudit 0.1.0 (openOODA sovereign agent & security)\n";
-}
+pub fn main(
+    fs: &FsReadCap,
+    fs_write: &FsWriteCap,
+    proc_cap: &ProcessCap,
+    env: &EnvCap,
+    args: List[String]
+) -> Result[Int, String] {
+    let opts: AuditOpts = parse_audit_opts(args);
 
-fn main(args: List[String]) -> Int {
-    let num_args: Int = list_len(args);
-    let mut i: Int = 0;
-
-    while i < num_args {
-        let arg: String = list_get(args, i);
-        if arg == "-h" || arg == "--help" {
-            print(render_help());
-            return 0;
-        }
-        if arg == "-v" || arg == "--version" {
-            print(render_version());
-            return 0;
-        }
-        if arg == "--mcp" {
-            print("{\"jsonrpc\":\"2.0\",\"result\":{\"status\":\"ready\",\"tool\":\"ooaudit\"}}\n");
-            return 0;
-        }
-        i = i + 1;
+    if opts.mode == "help" {
+        print(render_help());
+        return Ok(0);
+    }
+    if opts.mode == "version" {
+        println("ooaudit 0.2.0 (openOODA sovereign agent & security)");
+        return Ok(0);
+    }
+    if opts.mode == "mcp" {
+        run_mcp_server(fs, fs_write);
+        return Ok(0);
     }
 
-    print("ooaudit: sovereign capability-bounded utility ready\n");
-    return 0;
+    if opts.mode == "record" {
+        let ts: String = "2026-10-07T21:00:00Z";
+        let rec: AuditRecord = append_audit_event(fs, fs_write, opts.ledger_path, ts, opts.actor, opts.action, opts.target, opts.status);
+        if opts.json_output {
+            println(render_record_json(rec));
+        } else {
+            print(render_record_row(rec));
+        }
+        return Ok(0);
+    }
+
+    if opts.mode == "verify" {
+        let records: List[AuditRecord] = read_audit_ledger(fs, opts.ledger_path);
+        let vres: ChainVerificationResult = verify_audit_chain(records);
+        if opts.json_output {
+            println(render_verification_json(vres));
+        } else {
+            print(render_verification_human(vres));
+        }
+        if vres.is_valid {
+            return Ok(0);
+        }
+        return Ok(1);
+    }
+
+    if opts.mode == "stats" {
+        let records: List[AuditRecord] = read_audit_ledger(fs, opts.ledger_path);
+        let vres: ChainVerificationResult = verify_audit_chain(records);
+        if opts.json_output {
+            println(render_stats_json(records, vres));
+        } else {
+            print(render_stats_human(records, vres));
+        }
+        return Ok(0);
+    }
+
+    // Default: dump
+    let records: List[AuditRecord] = read_audit_ledger(fs, opts.ledger_path);
+    let total: Int = list_len(records);
+    if opts.json_output {
+        let mut j: String = "[";
+        let mut i: Int = 0;
+        while i < total {
+            if i > 0 { j = j + ","; }
+            let r: AuditRecord = list_get(records, i);
+            j = j + render_record_json(r);
+            i = i + 1;
+        }
+        j = j + "]";
+        println(j);
+    } else {
+        print(render_record_table_header());
+        let mut i: Int = 0;
+        while i < total {
+            let r: AuditRecord = list_get(records, i);
+            print(render_record_row(r));
+            i = i + 1;
+        }
+    }
+
+    return Ok(0);
 }

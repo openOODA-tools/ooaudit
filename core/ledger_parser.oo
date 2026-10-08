@@ -1,0 +1,64 @@
+// # Audit Ledger File Parser and Persistence
+//
+// Logline: Disk ledger persistence, record parsing, and hash-chained event append operations.
+//
+// Setup: Demands FsReadCap and FsWriteCap for ledger file IO. Operates without ambient authority.
+//
+// Beats:
+//   1. Ingest flat-file delimited ledger records into structured AuditRecord collections.
+//   2. Derive next sequential index and predecessor hash from active ledger state.
+//   3. Commit new hash-chained audit events atomically to disk storage.
+
+import "core/audit_entry.oo";
+import "core/hash_chain.oo";
+
+pub fn read_audit_ledger(fs_r: &FsReadCap, path: String) -> List[AuditRecord] {
+    let mut records: List[AuditRecord] = list_new();
+    let res: Result[String, String] = read_file(fs_r, path);
+    if !res.is_ok() {
+        return records;
+    }
+    let content: String = match res { Ok(s) => s, Err(_) => "" };
+    let lines: List[String] = str_split(content, "\n");
+    let count: Int = list_len(lines);
+    let mut i: Int = 0;
+    while i < count {
+        let line: String = str_trim(list_get(lines, i));
+        if chars_len(line) > 0 && !str_starts_with(line, "#") {
+            let rec: AuditRecord = parse_record_line(line);
+            records = list_push(records, rec);
+        }
+        i = i + 1;
+    }
+    return records;
+}
+
+pub fn write_audit_ledger(fs_w: &FsWriteCap, path: String, records: List[AuditRecord]) -> Bool {
+    let mut content: String = "";
+    let count: Int = list_len(records);
+    let mut i: Int = 0;
+    while i < count {
+        let r: AuditRecord = list_get(records, i);
+        content = content + format_record_line(r) + "\n";
+        i = i + 1;
+    }
+    let res: Result[String, String] = write_file(fs_w, path, content);
+    return res.is_ok();
+}
+
+pub fn append_audit_event(fs_r: &FsReadCap, fs_w: &FsWriteCap, path: String, ts: String, actor: String, act: String, target: String, status: String) -> AuditRecord {
+    let mut records: List[AuditRecord] = read_audit_ledger(fs_r, path);
+    let count: Int = list_len(records);
+    let next_seq: Int = count + 1;
+    let prev_hash: String = if count == 0 {
+        genesis_prev_hash()
+    } else {
+        let last_rec: AuditRecord = list_get(records, count - 1);
+        last_rec.entry_hash
+    };
+
+    let new_rec: AuditRecord = make_audit_record(next_seq, ts, actor, act, target, status, prev_hash);
+    records = list_push(records, new_rec);
+    let _ok: Bool = write_audit_ledger(fs_w, path, records);
+    return new_rec;
+}

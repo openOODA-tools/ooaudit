@@ -1,13 +1,18 @@
 // # ooaudit Root Anchor
 //
-// Logline: Top-level anchor re-exporting options, core logic, render, and ipc subsystems.
+// Logline: Consolidates core audit engine, terminal formatting, and MCP IPC services.
 //
-// Setup: Pure shim re-exporting all ooaudit subsystem anchors.
+// Setup: Root barrel shim linking all ooaudit internal domains.
 //
 // Beats:
-//   1. Re-export options parsing subsystem.
-//   2. Re-export core ooaudit execution engine.
-//   3. Re-export render formatting subsystem.
-//   4. Re-export Model Context Protocol (MCP) IPC subsystem.
+//   1. Re-export core audit models and hash chain verification.
+//   2. Re-export rendering themes and tabular output generators.
+//   3. Re-export IPC options parser and Model Context Protocol server.
 
-import "main.oo";
+import "core/anchor.oo";
+import "render/anchor.oo";
+import "ipc/anchor.oo";
+
+pub fn audit_version() -> String {
+    return "0.2.0";
+}

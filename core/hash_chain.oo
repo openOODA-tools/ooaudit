@@ -1,0 +1,96 @@
+// # Audit Ledger Hash-Chain Verification
+//
+// Logline: Cryptographic verification of sequential hash chains and tamper detection.
+//
+// Setup: Validates chain continuity, sequence monotonicity, and entry hash correctness.
+//
+// Beats:
+//   1. Inspect sequence numbers for contiguous monotonic order.
+//   2. Validate back-link integrity against preceding entry digests.
+//   3. Recalculate record payload hashes to detect payload tampering.
+
+import "core/audit_entry.oo";
+
+pub type ChainVerificationResult = struct {
+    is_valid: Bool,
+    total_records: Int,
+    verified_records: Int,
+    broken_seq: Int,
+    error_message: String,
+    head_hash: String
+};
+
+pub fn genesis_prev_hash() -> String {
+    return "0000000000000000000000000000000000000000000000000000000000000000";
+}
+
+pub fn verify_audit_chain(records: List[AuditRecord]) -> ChainVerificationResult {
+    let total: Int = list_len(records);
+    if total == 0 {
+        return ChainVerificationResult {
+            is_valid: true,
+            total_records: 0,
+            verified_records: 0,
+            broken_seq: 0,
+            error_message: "ledger is empty",
+            head_hash: genesis_prev_hash()
+        };
+    }
+
+    let mut expected_prev: String = genesis_prev_hash();
+    let mut verified: Int = 0;
+    let mut i: Int = 0;
+    let mut last_hash: String = "";
+
+    while i < total {
+        let r: AuditRecord = list_get(records, i);
+        let expected_seq: Int = i + 1;
+        if r.seq != expected_seq {
+            return ChainVerificationResult {
+                is_valid: false,
+                total_records: total,
+                verified_records: verified,
+                broken_seq: r.seq,
+                error_message: "sequence break at index " + to_string(i) + ": expected seq " + to_string(expected_seq) + ", got " + to_string(r.seq),
+                head_hash: last_hash
+            };
+        }
+
+        if i > 0 && r.prev_hash != expected_prev {
+            return ChainVerificationResult {
+                is_valid: false,
+                total_records: total,
+                verified_records: verified,
+                broken_seq: r.seq,
+                error_message: "chain broken at seq " + to_string(r.seq) + ": prev_hash mismatch",
+                head_hash: last_hash
+            };
+        }
+
+        let computed: String = compute_record_hash(r.seq, r.timestamp, r.actor, r.action, r.target, r.status, r.prev_hash);
+        if computed != r.entry_hash {
+            return ChainVerificationResult {
+                is_valid: false,
+                total_records: total,
+                verified_records: verified,
+                broken_seq: r.seq,
+                error_message: "tamper detected at seq " + to_string(r.seq) + ": entry_hash corrupted",
+                head_hash: last_hash
+            };
+        }
+
+        expected_prev = r.entry_hash;
+        last_hash = r.entry_hash;
+        verified = verified + 1;
+        i = i + 1;
+    }
+
+    return ChainVerificationResult {
+        is_valid: true,
+        total_records: total,
+        verified_records: verified,
+        broken_seq: 0,
+        error_message: "ledger integrity verified",
+        head_hash: last_hash
+    };
+}

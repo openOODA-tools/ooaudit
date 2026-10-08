@@ -1,0 +1,133 @@
+// # Model Context Protocol (MCP) Stdio Server for ooaudit
+//
+// Logline: JSON-RPC 2.0 stdio server providing action ledger append, verification, and audit query tools.
+//
+// Setup: Demands FsReadCap and FsWriteCap for ledger IO and stdio streaming. Operates without ambient authority.
+//
+// Beats:
+//   1. Process incoming JSON-RPC 2.0 requests over standard input.
+//   2. Dispatch initialize, tools/list, and tools/call methods.
+//   3. Stream capability-bounded responses for audit logging, verification, and queries.
+
+import "core/audit_entry.oo";
+import "core/hash_chain.oo";
+import "core/ledger_parser.oo";
+import "render/audit_theme.oo";
+import "ipc/json_field.oo";
+
+pub fn run_mcp_server(fs_r: &FsReadCap, fs_w: &FsWriteCap) {
+    let mut running: Bool = true;
+    while running {
+        let line_res: Result[String, String] = oo_read_stdin_chunk(fs_r, 8192);
+        if !line_res.is_ok() {
+            running = false;
+        } else {
+            let line: String = match line_res { Ok(s) => s, Err(_) => "" };
+            let trimmed: String = str_trim(line);
+            if chars_len(trimmed) == 0 {
+                running = false;
+            } else {
+                let id: String = json_get_field(trimmed, "id");
+                let method: String = json_get_string(trimmed, "method");
+
+                if method == "initialize" {
+                    let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                        ",\"result\":{\"protocolVersion\":\"2024-11-05\"," +
+                        "\"serverInfo\":{\"name\":\"ooaudit\",\"version\":\"0.2.0\"}," +
+                        "\"capabilities\":{\"tools\":{}}}}";
+                    println(resp);
+                } else if method == "notifications/initialized" {
+                    // ack
+                } else if method == "tools/list" {
+                    let t1: String = "{\"name\":\"audit_record\",\"description\":\"Append an immutable hash-chained audit event to the ledger\"," +
+                        "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"ledger\":{\"type\":\"string\"},\"actor\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"},\"target\":{\"type\":\"string\"},\"status\":{\"type\":\"string\"},\"timestamp\":{\"type\":\"string\"}},\"required\":[\"actor\",\"action\"]}}";
+                    let t2: String = "{\"name\":\"audit_verify\",\"description\":\"Verify cryptographic hash-chain continuity and detect tampering\"," +
+                        "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"ledger\":{\"type\":\"string\"}},\"required\":[\"ledger\"]}}";
+                    let t3: String = "{\"name\":\"audit_query\",\"description\":\"Query and filter ledger events\"," +
+                        "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"ledger\":{\"type\":\"string\"},\"actor\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"}}}}";
+                    let t4: String = "{\"name\":\"audit_stats\",\"description\":\"Compute ledger metrics and return head hash\"," +
+                        "\"inputSchema\":{\"type\":\"object\",\"properties\":{\"ledger\":{\"type\":\"string\"}},\"required\":[\"ledger\"]}}";
+                    let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                        ",\"result\":{\"tools\":[" + t1 + "," + t2 + "," + t3 + "," + t4 + "]}}";
+                    println(resp);
+                } else if method == "tools/call" {
+                    let params: String = json_get_field(trimmed, "params");
+                    let tool_name: String = json_get_string(params, "name");
+                    let args: String = json_get_field(params, "arguments");
+
+                    if tool_name == "audit_record" {
+                        let path: String = json_get_string(args, "ledger");
+                        let ledger_file: String = if chars_len(path) > 0 { path } else { "./ooaudit.ledger" };
+                        let actor: String = json_get_string(args, "actor");
+                        let act: String = json_get_string(args, "action");
+                        let tgt: String = json_get_string(args, "target");
+                        let stat: String = json_get_string(args, "status");
+                        let ts_in: String = json_get_string(args, "timestamp");
+                        let act_actor: String = if chars_len(actor) > 0 { actor } else { "agent" };
+                        let act_action: String = if chars_len(act) > 0 { act } else { "exec" };
+                        let act_target: String = if chars_len(tgt) > 0 { tgt } else { "target" };
+                        let act_status: String = if chars_len(stat) > 0 { stat } else { "ok" };
+                        let act_ts: String = if chars_len(ts_in) > 0 { ts_in } else { "2026-10-07T21:00:00Z" };
+
+                        let rec: AuditRecord = append_audit_event(fs_r, fs_w, ledger_file, act_ts, act_actor, act_action, act_target, act_status);
+                        let j: String = render_record_json(rec);
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + json_escape(j) + "\"}]}}";
+                        println(resp);
+                    } else if tool_name == "audit_verify" {
+                        let path: String = json_get_string(args, "ledger");
+                        let ledger_file: String = if chars_len(path) > 0 { path } else { "./ooaudit.ledger" };
+                        let records: List[AuditRecord] = read_audit_ledger(fs_r, ledger_file);
+                        let vres: ChainVerificationResult = verify_audit_chain(records);
+                        let j: String = render_verification_json(vres);
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + json_escape(j) + "\"}]}}";
+                        println(resp);
+                    } else if tool_name == "audit_stats" {
+                        let path: String = json_get_string(args, "ledger");
+                        let ledger_file: String = if chars_len(path) > 0 { path } else { "./ooaudit.ledger" };
+                        let records: List[AuditRecord] = read_audit_ledger(fs_r, ledger_file);
+                        let vres: ChainVerificationResult = verify_audit_chain(records);
+                        let j: String = render_stats_json(records, vres);
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + json_escape(j) + "\"}]}}";
+                        println(resp);
+                    } else if tool_name == "audit_query" {
+                        let path: String = json_get_string(args, "ledger");
+                        let ledger_file: String = if chars_len(path) > 0 { path } else { "./ooaudit.ledger" };
+                        let filter_actor: String = json_get_string(args, "actor");
+                        let filter_action: String = json_get_string(args, "action");
+                        let records: List[AuditRecord] = read_audit_ledger(fs_r, ledger_file);
+                        let total: Int = list_len(records);
+                        let mut j: String = "[";
+                        let mut count: Int = 0;
+                        let mut i: Int = 0;
+                        while i < total {
+                            let r: AuditRecord = list_get(records, i);
+                            let match_actor: Bool = (chars_len(filter_actor) == 0) || (r.actor == filter_actor);
+                            let match_action: Bool = (chars_len(filter_action) == 0) || (r.action == filter_action);
+                            if match_actor && match_action {
+                                if count > 0 { j = j + ","; }
+                                j = j + render_record_json(r);
+                                count = count + 1;
+                            }
+                            i = i + 1;
+                        }
+                        j = j + "]";
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"" + json_escape(j) + "\"}]}}";
+                        println(resp);
+                    } else {
+                        let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                            ",\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}";
+                        println(resp);
+                    }
+                } else {
+                    let resp: String = "{\"jsonrpc\":\"2.0\",\"id\":" + id +
+                        ",\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}";
+                    println(resp);
+                }
+            }
+        }
+    }
+}

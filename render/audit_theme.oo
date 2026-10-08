@@ -1,0 +1,108 @@
+// # ooaudit Rendering and Theme Formatter
+//
+// Logline: Formats action ledger records, verification reports, and metrics for human and JSON output.
+//
+// Setup: Pure string formatting utility supporting ANSI color palettes and JSON serialization.
+//
+// Beats:
+//   1. Provide ANSI styling helpers for status indicators and cryptographic hashes.
+//   2. Render tabular and record views of audit ledger events.
+//   3. Serialize verification audits and ledger metrics to standard JSON envelopes.
+
+import "core/audit_entry.oo";
+import "core/hash_chain.oo";
+
+pub fn ansi_reset() -> String { return "\x1b[0m"; }
+pub fn ansi_bold() -> String { return "\x1b[1m"; }
+pub fn ansi_dim() -> String { return "\x1b[2m"; }
+pub fn ansi_red() -> String { return "\x1b[31m"; }
+pub fn ansi_green() -> String { return "\x1b[32m"; }
+pub fn ansi_yellow() -> String { return "\x1b[33m"; }
+pub fn ansi_cyan() -> String { return "\x1b[36m"; }
+
+pub fn render_record_table_header() -> String {
+    return ansi_bold() + " SEQ  TIMESTAMP            ACTOR          ACTION          STATUS   HASH (PREFIX)" + ansi_reset() + "\n"
+        + " ───  ───────────────────  ─────────────  ──────────────  ───────  ──────────────\n";
+}
+
+fn pad_right(s: String, width: Int) -> String {
+    let mut out: String = s;
+    while chars_len(out) < width {
+        out = out + " ";
+    }
+    return out;
+}
+
+pub fn render_record_row(r: AuditRecord) -> String {
+    let seq_str: String = pad_right(to_string(r.seq), 4);
+    let ts_str: String = pad_right(r.timestamp, 20);
+    let actor_str: String = pad_right(r.actor, 14);
+    let act_str: String = pad_right(r.action, 15);
+    let stat_color: String = if r.status == "ok" || r.status == "success" {
+        ansi_green()
+    } else if r.status == "warn" || r.status == "warning" {
+        ansi_yellow()
+    } else {
+        ansi_red()
+    };
+    let stat_str: String = stat_color + pad_right(r.status, 8) + ansi_reset();
+    let hash_short: String = if chars_len(r.entry_hash) >= 12 {
+        str_slice(r.entry_hash, 0, 12) + "..."
+    } else {
+        r.entry_hash
+    };
+    return " " + seq_str + " " + ts_str + " " + actor_str + " " + act_str + " " + stat_str + " " + ansi_dim() + hash_short + ansi_reset() + "\n";
+}
+
+pub fn render_record_json(r: AuditRecord) -> String {
+    return "{\"seq\":" + to_string(r.seq)
+        + ",\"timestamp\":\"" + r.timestamp + "\""
+        + ",\"actor\":\"" + r.actor + "\""
+        + ",\"action\":\"" + r.action + "\""
+        + ",\"target\":\"" + r.target + "\""
+        + ",\"status\":\"" + r.status + "\""
+        + ",\"prev_hash\":\"" + r.prev_hash + "\""
+        + ",\"entry_hash\":\"" + r.entry_hash + "\"}";
+}
+
+pub fn render_verification_human(res: ChainVerificationResult) -> String {
+    if res.is_valid {
+        return ansi_green() + ansi_bold() + "[VERIFIED] " + ansi_reset()
+            + "Ledger integrity intact: " + to_string(res.verified_records) + " records validated.\n"
+            + "Head Hash: " + ansi_cyan() + res.head_hash + ansi_reset() + "\n";
+    }
+    return ansi_red() + ansi_bold() + "[TAMPERED] " + ansi_reset()
+        + res.error_message + " (broke at seq " + to_string(res.broken_seq) + ")\n"
+        + "Last Valid Hash: " + ansi_dim() + res.head_hash + ansi_reset() + "\n";
+}
+
+pub fn render_verification_json(res: ChainVerificationResult) -> String {
+    return "{\"is_valid\":" + (if res.is_valid { "true" } else { "false" })
+        + ",\"total_records\":" + to_string(res.total_records)
+        + ",\"verified_records\":" + to_string(res.verified_records)
+        + ",\"broken_seq\":" + to_string(res.broken_seq)
+        + ",\"error_message\":\"" + res.error_message + "\""
+        + ",\"head_hash\":\"" + res.head_hash + "\"}";
+}
+
+pub fn render_stats_human(records: List[AuditRecord], vres: ChainVerificationResult) -> String {
+    let total: Int = list_len(records);
+    let status_str: String = if vres.is_valid {
+        ansi_green() + "VALID" + ansi_reset()
+    } else {
+        ansi_red() + "INVALID" + ansi_reset()
+    };
+    return ansi_bold() + "ooaudit Ledger Statistics:" + ansi_reset() + "\n"
+        + "  Total Records:  " + to_string(total) + "\n"
+        + "  Chain Status:   " + status_str + "\n"
+        + "  Verified Count: " + to_string(vres.verified_records) + "\n"
+        + "  Head Hash:      " + ansi_cyan() + vres.head_hash + ansi_reset() + "\n";
+}
+
+pub fn render_stats_json(records: List[AuditRecord], vres: ChainVerificationResult) -> String {
+    let total: Int = list_len(records);
+    return "{\"total_records\":" + to_string(total)
+        + ",\"is_valid\":" + (if vres.is_valid { "true" } else { "false" })
+        + ",\"verified_records\":" + to_string(vres.verified_records)
+        + ",\"head_hash\":\"" + vres.head_hash + "\"}";
+}
